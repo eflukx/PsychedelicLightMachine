@@ -1,0 +1,45 @@
+;
+; in delta mode
+;
+; we need to add the delta values to the start values
+; for every interpolation step. The deltas are stored in 8.8 fixed point
+;
+Sequence_TimerInteruptHandler_delta_mode:
+    offY    sequenceStepsDoubleBufferFixed
+
+    ldi     MacroTemp,16            ; 16 bytes in total
+Sequence_TimerInteruptHandler_delta_add:
+    lpm                             ; load the MSB delta value (r0)
+    mov     Temp1,r0
+    adiw    ZLow,1                  ; load the LSB
+    lpm
+    mov     Temp2,r0
+    adiw    ZLow,1                  ; next delta, delta is now stored in temp1:temp2
+
+    push    YLow                    ; we need to store them also after the add
+    push    YHigh                   ; so save the offset
+
+    ld      r1,Y                    ; load the MSB
+    adiw    YLow,1                  
+    ld      r0,Y                    ; load the LSB
+
+    add     r0,temp2                ; temp1:temp2 + r1:r0
+    adc     r1,temp1
+
+    pop     YHigh
+    pop     Ylow
+
+    st      Y,r1                    ; store the LSB in SRAM
+    adiw    YLow,1                  
+    st      Y,r1                    ; store in SRAM
+    adiw    YLow,1                  
+
+    dec     MacroTemp
+    brne    Sequence_TimerInteruptHandler_delta_add
+
+    dec     sequenceDeltaStep       ; how many times do we have to add this delta
+    brne    sequence_interupt_exit
+
+    adiw    XLow,16                 ; point to the next delta row
+    rjmp    sequence_interupt_exit
+     

@@ -1,0 +1,129 @@
+;---------------------------------------------------------------------------
+; Description
+; light show sequencer
+;
+; idea:
+;
+; sequence are stored in the eeporm memo.
+; each sequence frame is made out of 16 bytes 
+; the first byte give the number of frames in the sequence
+;
+; the second timer of the avr is used to fecth the next frame, this way
+; the speed of a sequence can be easaly adjusted
+;---------------------------------------------------------------------------
+
+Sequence_Init:
+    clr     Temp1
+    out     TCCR1A,Temp1            ; no external ck divide or PWM mode
+
+	in      Temp1,TCCR1B			; set sequence timing properrties
+    andi    Temp1,0b11111000
+; prescale  
+;  1   = ck 
+;  10  = ck/8 
+;  11  = ck/64
+;  100 = ck/256
+;  101 = ck/1024
+    ori     Temp1,0b10
+    out     TCCR1B,Temp1
+
+	in      Temp1,TIMSK				; Enable PWM timer
+    andi    Temp1,0b01111111
+	ori	    Temp1,0b10000000        ; overflow interrupt on timer 1
+	out	    TIMSK,Temp1
+
+    clr     sequenceTimer
+    ret
+
+
+Sequence_play:
+    offCode __sequenceTable
+
+    lpm                             ; fetch the sequence length
+    ldi     Temp2,1                 ; pointer ++ to sequence start
+    add     Zlow,Temp2
+    clr     Temp2
+    adc     ZHigh,Temp2
+    ldi     Temp2,1                 ; pointer ++ to sequence start
+    add     Zlow,Temp2
+    clr     Temp2
+    adc     ZHigh,Temp2
+
+    mov     Temp1,r0                ; seq. lenght
+
+Sequence_next_step:
+    push    Temp1                   ; save the length
+
+; this is where the fonky shit takes place!
+
+    rcall   Sequence_updateStatusRegister
+    out     PORTC,statusRegister            ; upper light
+
+    rcall   Sequence_updateStatusRegister   ; lower light
+    out     PORTA,statusRegister
+
+    pop     Temp1                   ; restore the length
+    dec     Temp1
+    brne    Sequence_next_step      ; are we done?
+
+    ret
+
+;---------------------------------------------------------------------------
+; input = Z pointer to 8 sequence bytes
+;
+;---------------------------------------------------------------------------
+Sequence_updateStatusRegister:
+    clr     statusRegister    
+
+    ldi     Temp1,7                 ; 8 bytes per loop
+
+sequence_loop:
+    lpm                             ; fetch a phase cut from the sequence table
+    ldi     Temp2,1
+    add     Zlow,Temp2
+    clr     Temp2
+    adc     ZHigh,Temp2
+    ldi     Temp2,1
+    add     Zlow,Temp2
+    clr     Temp2
+    adc     ZHigh,Temp2
+
+    mov     phase_offset,r0
+
+    cp      phase_offset,width_counter  ; on or off?
+    brlo    toggleOn
+    rjmp    toggleOff
+
+toggleOn:
+    ldi     Temp2,1                 ; or value
+    mov     Delay1,Temp1            ; copy the loop counter
+
+    _inner_loop:
+        tst     Delay1              ; test for zero
+        breq    _exit_inner_loop
+        lsl     Temp2
+        dec     Delay1
+        brne    _inner_loop
+
+_exit_inner_loop:
+
+    or  statusRegister,Temp2
+
+toggleOff:
+    
+    dec     Temp1
+    brpl    sequence_loop
+
+    ret
+
+;---------------------------------------------------------------------------
+; sequence speed
+;---------------------------------------------------------------------------
+Sequence_TimerInteruptHandler:
+    SaveInt                     ; it does trash macrotemp :)
+  
+    inc     sequenceTimer       ; offset in the sequence table
+
+SeqTimer_exit:
+    RestoreInt
+    reti
